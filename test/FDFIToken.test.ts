@@ -38,6 +38,12 @@ describe("FDFIToken", () => {
         await expect(token.mintTo(await deployer.getAddress(), 1n)).to.be.revertedWith("Cap exceeded");
     });
 
+    it("should revert when minting to zero address", async () => {
+        const token = await deployProxy(await deployer.getAddress());
+        await expect(token.mintTo(ethers.ZeroAddress, ethers.parseUnits("100", 18)))
+            .to.be.revertedWith("Mint to zero");
+    });
+
     it("enforces transfer gating then enables once", async () => {
         const token = await deployProxy(await deployer.getAddress());
         // Mint some tokens first
@@ -47,6 +53,21 @@ describe("FDFIToken", () => {
         await expect(token.enableTransfers()).to.be.revertedWith("Transfers already enabled");
         await token.transfer(await user1.getAddress(), ethers.parseUnits("25", 18));
         expect(await token.balanceOf(await user1.getAddress())).to.equal(ethers.parseUnits("25", 18));
+    });
+
+    it("only owner can enable transfers", async () => {
+        const token = await deployProxy(await deployer.getAddress());
+        await expect(token.connect(user1).enableTransfers()).to.be.reverted;
+    });
+
+    it("should allow transferFrom after transfers enabled", async () => {
+        const token = await deployProxy(await deployer.getAddress());
+        await token.mintTo(await deployer.getAddress(), ethers.parseUnits("1000", 18));
+        await token.enableTransfers();
+        const amount = ethers.parseUnits("100", 18);
+        await token.approve(await user1.getAddress(), amount);
+        await token.connect(user1).transferFrom(await deployer.getAddress(), await user2.getAddress(), amount);
+        expect(await token.balanceOf(await user2.getAddress())).to.equal(amount);
     });
 
     it("burn reduces supply and balance", async () => {
@@ -175,5 +196,167 @@ describe("FDFIToken", () => {
         const v2 = await ethers.getContractAt("FDFITokenV2", proxyAddr);
         expect(await v2.balanceOf(await deployer.getAddress())).to.equal(balanceBefore);
         expect(await v2.version()).to.equal("2");
+    });
+
+    // Additional edge cases for better coverage
+    it("should handle multiple sequential mints correctly", async () => {
+        const token = await deployProxy(await deployer.getAddress());
+        const amount1 = ethers.parseUnits("500000000", 18);
+        const amount2 = ethers.parseUnits("300000000", 18);
+        const amount3 = ethers.parseUnits("200000000", 18);
+        
+        await token.mintTo(await deployer.getAddress(), amount1);
+        await token.mintTo(await user1.getAddress(), amount2);
+        await token.mintTo(await user2.getAddress(), amount3);
+        
+        expect(await token.totalSupply()).to.equal(amount1 + amount2 + amount3);
+    });
+
+    it("should correctly handle approve and allowance", async () => {
+        const token = await deployProxy(await deployer.getAddress());
+        await token.mintTo(await deployer.getAddress(), ethers.parseUnits("1000", 18));
+        await token.enableTransfers();
+        
+        const allowanceAmount = ethers.parseUnits("500", 18);
+        await token.approve(await user1.getAddress(), allowanceAmount);
+        
+        expect(await token.allowance(await deployer.getAddress(), await user1.getAddress()))
+            .to.equal(allowanceAmount);
+    });
+
+    it("should handle burn from delegated address", async () => {
+        const token = await deployProxy(await deployer.getAddress());
+        await token.mintTo(await deployer.getAddress(), ethers.parseUnits("1000", 18));
+        await token.enableTransfers();
+        
+        // Delegate to self first
+        await token.delegate(await deployer.getAddress());
+        
+        const burnAmount = ethers.parseUnits("100", 18);
+        const balanceBefore = await token.balanceOf(await deployer.getAddress());
+        const votesBefore = await token.getVotes(await deployer.getAddress());
+        
+        await token.burn(burnAmount);
+        
+        expect(await token.balanceOf(await deployer.getAddress())).to.equal(balanceBefore - burnAmount);
+        expect(await token.getVotes(await deployer.getAddress())).to.equal(votesBefore - burnAmount);
+    });
+
+    it("should handle delegation changes correctly", async () => {
+        const token = await deployProxy(await deployer.getAddress());
+        const amount = ethers.parseUnits("1000", 18);
+        await token.mintTo(await deployer.getAddress(), amount);
+        await token.enableTransfers();
+        
+        // Initially no delegation
+        expect(await token.getVotes(await deployer.getAddress())).to.equal(0n);
+        
+        // Self-delegate
+        await token.delegate(await deployer.getAddress());
+        expect(await token.getVotes(await deployer.getAddress())).to.equal(amount);
+        
+        // Delegate to user1
+        await token.delegate(await user1.getAddress());
+        expect(await token.getVotes(await deployer.getAddress())).to.equal(0n);
+        expect(await token.getVotes(await user1.getAddress())).to.equal(amount);
+    });
+
+    it("should correctly track delegatee after token transfer", async () => {
+        const token = await deployProxy(await deployer.getAddress());
+        await token.mintTo(await deployer.getAddress(), ethers.parseUnits("2000", 18));
+        await token.enableTransfers();
+        
+        // Deployer self-delegates
+        await token.delegate(await deployer.getAddress());
+        const deployerBalance = await token.balanceOf(await deployer.getAddress());
+        expect(await token.getVotes(await deployer.getAddress())).to.equal(deployerBalance);
+        
+        // Transfer to user1
+        const transferAmount = ethers.parseUnits("500", 18);
+        await token.transfer(await user1.getAddress(), transferAmount);
+        
+        // Deployer votes should decrease
+        expect(await token.getVotes(await deployer.getAddress()))
+            .to.equal(deployerBalance - transferAmount);
+        
+        // User1 has no votes until delegation
+        expect(await token.getVotes(await user1.getAddress())).to.equal(0n);
+        
+        // User1 self-delegates
+        await token.connect(user1).delegate(await user1.getAddress());
+        expect(await token.getVotes(await user1.getAddress())).to.equal(transferAmount);
+    });
+
+    it("should enforce cap at exactly MAX_SUPPLY", async () => {
+        const token = await deployProxy(await deployer.getAddress());
+        const maxSupply = ethers.parseUnits("2000000000", 18);
+        
+        // Mint exactly to the cap
+        await token.mintTo(await deployer.getAddress(), maxSupply);
+        expect(await token.totalSupply()).to.equal(maxSupply);
+        
+        // Any additional mint should fail
+        await expect(token.mintTo(await deployer.getAddress(), 1n))
+            .to.be.revertedWith("Cap exceeded");
+    });
+
+    it("should handle nonces correctly for permit", async () => {
+        const token = await deployProxy(await deployer.getAddress());
+        const deployerAddr = await deployer.getAddress();
+        
+        // Initial nonce should be 0
+        expect(await token.nonces(deployerAddr)).to.equal(0n);
+        
+        // After a permit, nonce should increment
+        const spender = await user1.getAddress();
+        const value = ethers.parseUnits("100", 18);
+        const deadline = Math.floor(Date.now() / 1000) + 3600;
+        
+        const domain = {
+            name: "FDFI Token",
+            version: "1",
+            chainId: (await ethers.provider.getNetwork()).chainId,
+            verifyingContract: await token.getAddress()
+        };
+        
+        const types = {
+            Permit: [
+                { name: "owner", type: "address" },
+                { name: "spender", type: "address" },
+                { name: "value", type: "uint256" },
+                { name: "nonce", type: "uint256" },
+                { name: "deadline", type: "uint256" }
+            ]
+        };
+        
+        const signature = await (deployer as any).signTypedData(domain, types, {
+            owner: deployerAddr,
+            spender,
+            value,
+            nonce: 0,
+            deadline
+        });
+        
+        const { v, r, s } = ethers.Signature.from(signature);
+        await token.permit(deployerAddr, spender, value, deadline, v, r, s);
+        
+        // Nonce should now be 1
+        expect(await token.nonces(deployerAddr)).to.equal(1n);
+    });
+
+    it("should allow burning tokens after enabling transfers", async () => {
+        const token = await deployProxy(await deployer.getAddress());
+        const mintAmount = ethers.parseUnits("1000", 18);
+        await token.mintTo(await deployer.getAddress(), mintAmount);
+        
+        // Enable transfers
+        await token.enableTransfers();
+        
+        const burnAmount = ethers.parseUnits("250", 18);
+        await token.burn(burnAmount);
+        
+        expect(await token.balanceOf(await deployer.getAddress()))
+            .to.equal(mintAmount - burnAmount);
+        expect(await token.totalSupply()).to.equal(mintAmount - burnAmount);
     });
 });
