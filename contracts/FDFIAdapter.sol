@@ -83,8 +83,9 @@ contract FDFIOFTAdapter is OFTAdapter, RateLimiter {
         uint32 _dstEid
     ) internal virtual override returns (uint256 amountSentLD, uint256 amountReceivedLD) {
         _outflow(_dstEid, _amountLD); // enforce outbound limit keyed by destination eid
-        // Fetch remaining capacity for observability (non-view internal state read)
-        (, uint256 remaining, ) = getRateLimit(_dstEid); // assuming RateLimiter exposes this helper
+        // Fetch remaining capacity for observability
+        RateLimit memory rl = rateLimits[_dstEid];
+        (, uint256 remaining) = _amountCanBeSent(rl.amountInFlight, rl.lastUpdated, rl.limit, rl.window);
         emit OutflowRateConsumed(_dstEid, _amountLD, remaining);
         return super._debit(_from, _amountLD, _minAmountLD, _dstEid);
     }
@@ -100,10 +101,12 @@ contract FDFIOFTAdapter is OFTAdapter, RateLimiter {
         address _to,
         uint256 _amountLD,
         uint32 _srcEid
-    ) internal virtual override {
+    ) internal virtual override returns (uint256 amountReceivedLD) {
         _inflow(_srcEid, _amountLD); // enforce inbound limit keyed by source eid
-        (, uint256 remaining, ) = getRateLimit(_srcEid);
+        // Fetch remaining capacity for observability
+        RateLimit memory rl = rateLimits[_srcEid];
+        (, uint256 remaining) = _amountCanBeSent(rl.amountInFlight, rl.lastUpdated, rl.limit, rl.window);
         emit InflowRateConsumed(_srcEid, _amountLD, remaining);
-        super._credit(_to, _amountLD, _srcEid);
+        return super._credit(_to, _amountLD, _srcEid);
     }
 }
