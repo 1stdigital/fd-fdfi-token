@@ -57,4 +57,53 @@ contract FDFIOFTAdapter is OFTAdapter, RateLimiter {
         if (msg.sender != rateLimiter && msg.sender != owner()) revert OnlyRateLimiter();
         _setRateLimits(_rateLimitConfigs);
     }
+
+    /*//////////////////////////////////////////////////////////////////
+                             RATE ENFORCEMENT
+    //////////////////////////////////////////////////////////////////*/
+    /// @dev Emitted after a successful inbound rate check (post-consumption)
+    event InflowRateConsumed(uint32 indexed srcEid, uint256 amountLD, uint256 remainingCapacity);
+    /// @dev Emitted after a successful outbound rate check (post-consumption)
+    event OutflowRateConsumed(uint32 indexed dstEid, uint256 amountLD, uint256 remainingCapacity);
+
+    /**
+     * @notice Outbound hook override to enforce per-destination rate limit.
+     * @dev Consumes outbound capacity before performing the underlying debit logic.
+     * @param _from      Sender address initiating the bridge.
+     * @param _amountLD  Amount in local decimals requested to send.
+     * @param _minAmountLD Minimum acceptable amount after fees/slippage.
+     * @param _dstEid    LayerZero destination Endpoint ID.
+     * @return amountSentLD    Actual amount debited from sender (may equal _amountLD).
+     * @return amountReceivedLD Amount to be received/minted on destination chain.
+     */
+    function _debit(
+        address _from,
+        uint256 _amountLD,
+        uint256 _minAmountLD,
+        uint32 _dstEid
+    ) internal virtual override returns (uint256 amountSentLD, uint256 amountReceivedLD) {
+        _outflow(_dstEid, _amountLD); // enforce outbound limit keyed by destination eid
+        // Fetch remaining capacity for observability (non-view internal state read)
+        (, uint256 remaining, ) = getRateLimit(_dstEid); // assuming RateLimiter exposes this helper
+        emit OutflowRateConsumed(_dstEid, _amountLD, remaining);
+        return super._debit(_from, _amountLD, _minAmountLD, _dstEid);
+    }
+
+    /**
+     * @notice Inbound hook override to enforce per-source rate limit.
+     * @dev Consumes inbound capacity prior to crediting/minting tokens unlocked by bridging.
+     * @param _to       Recipient address on this (canonical) chain.
+     * @param _amountLD Amount in local decimals to credit.
+     * @param _srcEid   LayerZero source Endpoint ID.
+     */
+    function _credit(
+        address _to,
+        uint256 _amountLD,
+        uint32 _srcEid
+    ) internal virtual override {
+        _inflow(_srcEid, _amountLD); // enforce inbound limit keyed by source eid
+        (, uint256 remaining, ) = getRateLimit(_srcEid);
+        emit InflowRateConsumed(_srcEid, _amountLD, remaining);
+        super._credit(_to, _amountLD, _srcEid);
+    }
 }
