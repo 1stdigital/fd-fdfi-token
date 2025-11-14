@@ -55,7 +55,6 @@ contract FDFIToken is
     /// @param to Recipient address (e.g. vesting contract or treasury multisig).
     /// @param amount Amount of tokens to mint (18 decimals).
     function mintTo(address to, uint256 amount) external onlyOwner {
-        require(to != address(0), "Mint to zero");
         require(totalSupply() + amount <= MAX_SUPPLY, "Cap exceeded");
         _mint(to, amount);
     }

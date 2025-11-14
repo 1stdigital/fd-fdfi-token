@@ -6,7 +6,7 @@ import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import { ERC20PermitUpgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
-import { ERC20BurnableUpgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
+// Burnability removed on satellites to prevent unreported local burns
 
 import { OFTUpgradeable } from "@layerzerolabs/oft-evm-upgradeable/contracts/oft/OFTUpgradeable.sol";
 // Local wrapper since LayerZero does not provide an upgradeable RateLimiter
@@ -20,7 +20,6 @@ contract FDFIOFTUpgradeable is
     OFTUpgradeable,
     RateLimiterUpgradeable,
     ERC20PermitUpgradeable,
-    ERC20BurnableUpgradeable,
     Ownable2StepUpgradeable,
     UUPSUpgradeable
 {
@@ -50,12 +49,10 @@ contract FDFIOFTUpgradeable is
         RateLimitConfig[] memory _rateLimitConfigs,
         string memory _name,
         string memory _symbol,
-        address _lzEndpoint,
         address _owner
     ) external initializer {
         __OFT_init(_name, _symbol, _owner);
         __ERC20Permit_init(_name);
-        __ERC20Burnable_init();
         __Ownable2Step_init();
         __UUPSUpgradeable_init();
         __RateLimiter_init(_rateLimitConfigs);
