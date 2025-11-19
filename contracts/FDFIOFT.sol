@@ -42,7 +42,6 @@ contract FDFIOFTUpgradeable is
      * @param _rateLimitConfigs Initial rate limit configs (can be empty)
      * @param _name Token name
      * @param _symbol Token symbol
-     * @param _lzEndpoint LayerZero endpoint
      * @param _owner Admin / multisig owner
      */
     function initialize(
