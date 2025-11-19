@@ -40,8 +40,9 @@ describe("FDFIToken", () => {
 
     it("should revert when minting to zero address", async () => {
         const token = await deployProxy(await deployer.getAddress());
+        // OpenZeppelin's _mint already prevents minting to zero address with ERC20InvalidReceiver error
         await expect(token.mintTo(ethers.ZeroAddress, ethers.parseUnits("100", 18)))
-            .to.be.revertedWith("Mint to zero");
+            .to.be.revertedWithCustomError(token, "ERC20InvalidReceiver");
     });
 
     it("enforces transfer gating then enables once", async () => {
